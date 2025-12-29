@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*$py.class
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.vscode/
+.idea/
+data/*.json        # Исключаем реальные данные из Git (кроме примера)
+logs/
