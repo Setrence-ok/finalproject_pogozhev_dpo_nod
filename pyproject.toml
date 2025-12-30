@@ -1,14 +1,17 @@
 [project]
 name = "projecct1-pogozhev-evgenii-dpo-nod"
 version = "0.1.0"
-description = "My first game"
+description = "CLI приложение для симуляции торговли валютами с парсером курсов"
 authors = [
     {name = "Setrence, Setrence1@yandex.ru"}
 ]
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "prettytable (>=3.17.0,<4.0.0)"
+    "prettytable (>=3.17.0,<4.0.0)",
+    "toml (>=0.10.2,<0.11.0)",
+    "requests (>=2.32.5,<3.0.0)",
+    "django-scheduler (>=0.10.1,<0.11.0)"
 ]
 
 [tool.poetry]
@@ -19,7 +22,20 @@ requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
-project = "main:main"
+valutatrade = "main:main"
+valutatrade-parser = "valutatrade_hub.parser_service.cli:main"
+
+[tool.valutatrade]
+data_dir = "data"
+rates_ttl_seconds = 300
+default_base_currency = "USD"
+log_dir = "logs"
+log_level = "INFO"
+log_format = "text"
+log_max_size_mb = 10
+log_backup_count = 5
+api_timeout = 30
+api_max_retries = 3
 
 [tool.ruff]
 line-length = 88
@@ -34,3 +50,10 @@ ignore = []
 dev = [
     "ruff (>=0.14.2,<0.15.0)"
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
