@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
+"""Точка входа в приложение Валютный кошелёк"""
+
+from valutatrade_hub.cli.interface import CLIInterface
 
 
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
+def main():
+    """Основная функция запуска"""
+    cli = CLIInterface()
+    cli.run()
 
 
-if __name__ == '__main__':
-    print_hi('PyCharm')
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+if __name__ == "__main__":
+    main()
