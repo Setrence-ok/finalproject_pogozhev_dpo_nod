@@ -1,7 +1,10 @@
 import json
 import hashlib
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class User:
@@ -9,21 +12,46 @@ class User:
             self,
             user_id: int,
             username: str,
-            password: str,  # Пароль в открытом виде при создании
+            password: str = "",  # Может быть пустым при загрузке из БД
             salt: Optional[str] = None,
-            registration_date: Optional[str] = None
+            registration_date: Optional[str] = None,
+            hashed_password: Optional[str] = None  # Новый параметр для загрузки из БД
     ):
         self.__user_id = user_id
         self.__username = username
 
-        # Генерация соли, если не передана
-        self.__salt = salt or hashlib.sha256(str(user_id).encode()).hexdigest()[:8]
-
-        # Хеширование пароля
-        self.__hashed_password = self._hash_password(password, self.__salt)
+        # ИСПРАВЛЕНИЕ: Правильная обработка при загрузке из БД
+        if hashed_password and salt:
+            # При загрузке из БД используем готовые значения
+            self.__hashed_password = hashed_password
+            self.__salt = salt
+            logger.debug(f"User loaded from DB: {username}, hash exists")
+        else:
+            # При создании нового пользователя генерируем соль и хеш
+            self.__salt = salt or self._generate_salt(user_id)
+            if password:
+                self.__hashed_password = self._hash_password(password, self.__salt)
+                logger.debug(f"New user created: {username}, hash generated")
+            else:
+                raise ValueError("Password required for new user")
 
         # Дата регистрации
-        self.__registration_date = registration_date or datetime.now().isoformat()
+        if registration_date:
+            self.__registration_date = registration_date
+        else:
+            self.__registration_date = datetime.now().isoformat()
+
+    def _generate_salt(self, user_id: int) -> str:
+        """Генерация уникальной соли"""
+        import time
+        # Используем комбинацию user_id и времени для уникальности
+        base = f"{user_id}_{time.time_ns()}_{hashlib.sha256(str(user_id).encode()).hexdigest()[:8]}"
+        return hashlib.sha256(base.encode()).hexdigest()[:16]
+
+    def _hash_password(self, password: str, salt: str) -> str:
+        """Хеширование пароля с солью (UTF-8 кодировка)"""
+        data = (password + salt).encode('utf-8')
+        return hashlib.sha256(data).hexdigest()
 
     # ========== ГЕТТЕРЫ ==========
     @property
@@ -54,13 +82,23 @@ class User:
         self.__username = value
 
     # ========== МЕТОДЫ ==========
-    def _hash_password(self, password: str, salt: str) -> str:
-        """Хеширование пароля с солью"""
-        return hashlib.sha256((password + salt).encode()).hexdigest()
-
     def verify_password(self, password: str) -> bool:
-        """Проверка пароля"""
-        return self.__hashed_password == self._hash_password(password, self.__salt)
+        """Проверка пароля с подробным логированием для отладки"""
+        if not password:
+            logger.warning(f"Empty password provided for user {self.__username}")
+            return False
+
+        computed_hash = self._hash_password(password, self.__salt)
+        is_valid = self.__hashed_password == computed_hash
+
+        logger.debug(f"Password verification for {self.__username}:")
+        logger.debug(f"  Provided password: {'*' * len(password)}")
+        logger.debug(f"  Salt used: {self.__salt}")
+        logger.debug(f"  Stored hash: {self.__hashed_password[:20]}...")
+        logger.debug(f"  Computed hash: {computed_hash[:20]}...")
+        logger.debug(f"  Result: {'VALID' if is_valid else 'INVALID'}")
+
+        return is_valid
 
     def change_password(self, new_password: str):
         """Изменение пароля"""
@@ -68,7 +106,7 @@ class User:
             raise ValueError("Пароль должен быть не короче 4 символов")
         self.__hashed_password = self._hash_password(new_password, self.__salt)
 
-    def get_user_info(self) -> dict:
+    def get_user_info(self) -> Dict[str, Any]:
         """Возвращает информацию о пользователе (без пароля)"""
         return {
             "user_id": self.__user_id,
@@ -76,7 +114,7 @@ class User:
             "registration_date": self.__registration_date
         }
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, Any]:
         """Сериализация в словарь для JSON"""
         return {
             "user_id": self.__user_id,
@@ -87,15 +125,25 @@ class User:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'User':
+    def from_dict(cls, data: Dict[str, Any]) -> 'User':
         """Десериализация из словаря"""
+        logger.debug(f"Loading user from dict: username={data.get('username')}")
+
+        # ВАЖНО: При загрузке из БД передаем готовый хеш и соль
         return cls(
             user_id=data["user_id"],
             username=data["username"],
-            password="",  # Пароль не нужен при загрузке
+            password="",  # Пустой пароль, т.к. хеш уже есть
             salt=data["salt"],
-            registration_date=data["registration_date"]
+            registration_date=data["registration_date"],
+            hashed_password=data["hashed_password"]  # Готовый хеш из БД
         )
+
+    def __str__(self) -> str:
+        return f"User(id={self.__user_id}, username='{self.__username}')"
+
+    def __repr__(self) -> str:
+        return f"User(user_id={self.__user_id}, username='{self.__username}')"
 
 
 class Wallet:
