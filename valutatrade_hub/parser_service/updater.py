@@ -1,6 +1,4 @@
 import logging
-from typing import Dict
-from datetime import datetime
 
 from .config import ParserConfig
 from .api_clients import CoinGeckoClient, ExchangeRateApiClient

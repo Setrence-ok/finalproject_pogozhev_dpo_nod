@@ -1,8 +1,6 @@
-import json
 import hashlib
 from datetime import datetime
-from dataclasses import dataclass, asdict
-from typing import Dict, Optional, Any
+from typing import Dict, Optional
 
 
 class User:

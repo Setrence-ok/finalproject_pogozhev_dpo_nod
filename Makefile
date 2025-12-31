@@ -3,28 +3,42 @@ install:
 
 project:
 	@echo "Usage:"
-	@echo "  make register USERNAME=alice PASSWORD=1234"
-	@echo "  make login USERNAME=alice PASSWORD=1234"
+	@echo "  make register"
+	@echo "  make login"
 	@echo "  make portfolio"
-	@echo "  Or use directly: poetry run project <command>"
+	@echo "  make buy"
+	@echo "  make sell"
+	@echo "  make get-rate"
+	@echo "  make update-rates"
+	@echo "  make show-rates"
 
 register:
-	poetry run project register --username $(USERNAME) --password $(PASSWORD)
+	@read -p "Username: " username; \
+	read -p "Password: " password; \
+	poetry run project register --username $$username --password $$password
 
 login:
-	poetry run project login --username $(USERNAME) --password $(PASSWORD)
+	@read -p "Username: " username; \
+	read -p "Password: " password; \
+	poetry run project login --username $$username --password $$password
 
 portfolio:
 	poetry run project show-portfolio
 
 buy:
-	poetry run project buy --currency $(CURRENCY) --amount $(AMOUNT)
+	@read -p "Currency code (BTC, ETH, USD, etc.): " currency; \
+	read -p "Amount: " amount; \
+	poetry run project buy --currency $$currency --amount $$amount
 
 sell:
-	poetry run project sell --currency $(CURRENCY) --amount $(AMOUNT)
+	@read -p "Currency code (BTC, ETH, USD, etc.): " currency; \
+	read -p "Amount: " amount; \
+	poetry run project sell --currency $$currency --amount $$amount
 
 get-rate:
-	poetry run project get-rate --from $(FROM) --to $(TO)
+	read -p "From currency (BTC, ETH, USD, etc.): " from_currency; \
+	read -p "To currency (BTC, ETH, USD, etc.): " to_currency; \
+	poetry run project get-rate --from "$$from_currency" --to "$$to_currency"
 
 update-rates:
 	poetry run project update-rates
@@ -43,3 +57,6 @@ package-install:
 
 lint:
 	poetry run ruff check .
+
+test:
+	python test_session.py
