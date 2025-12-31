@@ -4,6 +4,6 @@ build/
 .pytest_cache/
 .venv/
 .idea/
-data/*
-logs/*
+data/
+logs/
 .ruff_cache/
