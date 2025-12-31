@@ -36,7 +36,7 @@ sell:
 	poetry run project sell --currency $$currency --amount $$amount
 
 get-rate:
-	read -p "From currency (BTC, ETH, USD, etc.): " from_currency; \
+	@read -p "From currency (USD, etc.): " from_currency; \
 	read -p "To currency (BTC, ETH, USD, etc.): " to_currency; \
 	poetry run project get-rate --from "$$from_currency" --to "$$to_currency"
 
