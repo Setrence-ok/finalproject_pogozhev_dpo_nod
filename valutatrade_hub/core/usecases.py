@@ -1,252 +1,239 @@
-import hashlib
-from typing import Optional, Dict, Any, Tuple
+import json
+import os
 from datetime import datetime
+from typing import Dict, Optional, Tuple
 
-from .models import User, Portfolio, Wallet
-from .utils import JSONFileManager, validate_currency_code, validate_amount
+from .exceptions import CurrencyNotFoundError, InsufficientFundsError
+from .models import User, Wallet, Portfolio
+from .utils import SessionManager
+from ..infra.database import DatabaseManager
+from ..decorators import log_action
+from ..infra.settings import SettingsLoader
+from .currencies import CurrencyRegistry
 
 
-class UserManager:
-    """Менеджер пользователей"""
-
-    def __init__(self):
-        self.file_manager = JSONFileManager()
-        self.current_user: Optional[User] = None
-
-    def register(self, username: str, password: str) -> User:
-        """Регистрация нового пользователя"""
-        # Загрузка существующих пользователей
-        users_data = self.file_manager.load_json("users.json", [])
-
-        # Проверка уникальности username
-        for user_data in users_data:
-            if user_data["username"] == username:
-                raise ValueError(f"Имя пользователя '{username}' уже занято")
-
-        # Проверка пароля
+class UserUseCases:
+    @staticmethod
+    def register(username: str, password: str) -> User:
         if len(password) < 4:
             raise ValueError("Пароль должен быть не короче 4 символов")
 
-        # Генерация user_id
-        user_id = max([u.get("user_id", 0) for u in users_data], default=0) + 1
+        db = DatabaseManager()
+        users = db.load_users()
 
-        # Создание пользователя
-        user = User(user_id=user_id, username=username, password=password)
+        if any(u["username"] == username for u in users):
+            raise ValueError(f"Имя пользователя '{username}' уже занято")
 
-        # Сохранение пользователя
-        users_data.append(user.to_dict())
-        self.file_manager.save_json("users.json", users_data)
+        user_id = max((u["user_id"] for u in users), default=0) + 1
+        salt = User._User__generate_salt()
+        hashed_password = User._User__hash_password(password, salt)
 
-        # Создание пустого портфеля
-        portfolio = Portfolio(user_id=user_id)
-        self._save_portfolio(portfolio)
+        user = User(
+            user_id=user_id,
+            username=username,
+            hashed_password=hashed_password,
+            salt=salt,
+            registration_date=datetime.now()
+        )
+
+        users.append(user.to_dict())
+        db.save_users(users)
+
+        # Создаем пустой портфель
+        portfolios = db.load_portfolios()
+        portfolios.append({
+            "user_id": user_id,
+            "wallets": {}
+        })
+        db.save_portfolios(portfolios)
 
         return user
 
-    def login(self, username: str, password: str) -> User:
-        """Вход пользователя"""
-        users_data = self.file_manager.load_json("users.json", [])
+    @staticmethod
+    def login(username: str, password: str) -> User:
+        db = DatabaseManager()
+        users = db.load_users()
 
-        # Поиск пользователя
-        user_data = None
-        for u in users_data:
-            if u["username"] == username:
-                user_data = u
-                break
-
+        user_data = next((u for u in users if u["username"] == username), None)
         if not user_data:
             raise ValueError(f"Пользователь '{username}' не найден")
 
-        # Создание объекта User
         user = User.from_dict(user_data)
 
-        # Проверка пароля
         if not user.verify_password(password):
             raise ValueError("Неверный пароль")
 
-        self.current_user = user
+        SessionManager.login(user)
         return user
 
-    def logout(self) -> None:
-        """Выход пользователя"""
-        self.current_user = None
 
-    def _save_portfolio(self, portfolio: Portfolio) -> None:
-        """Сохранение портфеля"""
-        portfolios_data = self.file_manager.load_json("portfolios.json", {})
-        portfolios_data[str(portfolio.user_id)] = portfolio.to_dict()
-        self.file_manager.save_json("portfolios.json", portfolios_data)
+class PortfolioUseCases:
+    @staticmethod
+    def get_portfolio(user_id: int) -> Portfolio:
+        db = DatabaseManager()
+        portfolios = db.load_portfolios()
 
-    def get_current_portfolio(self) -> Optional[Portfolio]:
-        """Получение портфеля текущего пользователя"""
-        if not self.current_user:
-            return None
+        portfolio_data = next((p for p in portfolios if p["user_id"] == user_id), None)
+        if not portfolio_data:
+            portfolio_data = {"user_id": user_id, "wallets": {}}
+            portfolios.append(portfolio_data)
+            db.save_portfolios(portfolios)
 
-        portfolios_data = self.file_manager.load_json("portfolios.json", {})
-        user_portfolio = portfolios_data.get(str(self.current_user.user_id))
+        return Portfolio.from_dict(portfolio_data)
 
-        if user_portfolio:
-            return Portfolio.from_dict(user_portfolio)
+
+    @staticmethod
+    def save_portfolio(portfolio: Portfolio):
+        db = DatabaseManager()
+        portfolios = db.load_portfolios()
+
+        for i, p in enumerate(portfolios):
+            if p["user_id"] == portfolio.user_id:
+                portfolios[i] = portfolio.to_dict()
+                break
         else:
-            # Создание пустого портфеля, если не существует
-            portfolio = Portfolio(user_id=self.current_user.user_id)
-            self._save_portfolio(portfolio)
-            return portfolio
+            portfolios.append(portfolio.to_dict())
 
+        db.save_portfolios(portfolios)
 
-class PortfolioManager:
-    """Менеджер портфелей и операций"""
+    @staticmethod
+    @log_action(action_name="BUY", verbose=True)
+    def buy_currency(user_id: int, currency_code: str, amount: float) -> Tuple[Portfolio, float]:
+        """Купить валюту"""
+        if amount <= 0:
+            raise ValueError("'amount' должен быть положительным числом")
 
-    def __init__(self, user_manager: UserManager):
-        self.user_manager = user_manager
-        self.file_manager = JSONFileManager()
+        # Валидация валюты через реестр
+        try:
+            currency = CurrencyRegistry.get_currency(currency_code.upper())
+        except CurrencyNotFoundError:
+            raise CurrencyNotFoundError(currency_code.upper())
 
-        # Фиксированные курсы для демонстрации
-        self.exchange_rates = self._load_exchange_rates()
+        portfolio = PortfolioUseCases.get_portfolio(user_id)
 
-    def _load_exchange_rates(self) -> Dict[str, Dict]:
-        """Загрузка курсов валют"""
-        return self.file_manager.load_json("rates.json", {
-            "last_refresh": datetime.now().isoformat(),
-            "rates": {
-                "EUR_USD": {"rate": 1.0786, "updated_at": datetime.now().isoformat()},
-                "BTC_USD": {"rate": 59337.21, "updated_at": datetime.now().isoformat()},
-                "RUB_USD": {"rate": 0.01016, "updated_at": datetime.now().isoformat()},
-                "ETH_USD": {"rate": 3720.00, "updated_at": datetime.now().isoformat()},
-            }
-        })
+        # Получаем курс из базы данных
+        db = DatabaseManager()
+        rates = db.load_rates()
+        rate_key = f"{currency_code.upper()}_USD"
 
-    def show_portfolio(self, base_currency: str = "USD") -> Tuple[Dict, float]:
-        """Показать портфель пользователя"""
-        if not self.user_manager.current_user:
-            raise ValueError("Сначала выполните login")
+        # Проверяем актуальность курса
+        settings = SettingsLoader()
+        ttl_seconds = settings.get("RATES_TTL_SECONDS", 300)
 
-        portfolio = self.user_manager.get_current_portfolio()
-        if not portfolio:
-            return {}, 0.0
+        if rate_key not in rates.get("pairs", {}):
+            raise ValueError(f"Не удалось получить курс для {currency_code}")
 
-        # Получение информации о кошельках
-        wallets_info = {}
-        for currency, wallet in portfolio.wallets.items():
-            wallets_info[currency] = {
-                "balance": wallet.balance,
-                "value_in_base": self._convert_currency(
-                    wallet.balance, currency, base_currency
-                )
-            }
+        rate_data = rates["pairs"][rate_key]
+        updated_at = datetime.fromisoformat(rate_data["updated_at"])
+        now = datetime.now()
 
-        total_value = portfolio.get_total_value(base_currency)
-        return wallets_info, total_value
+        if (now - updated_at).total_seconds() > ttl_seconds:
+            raise ValueError(f"Курс для {currency_code} устарел. Выполните 'update-rates'")
 
-    def buy_currency(self, currency_code: str, amount: float) -> Dict:
-        """Покупка валюты"""
-        if not self.user_manager.current_user:
-            raise ValueError("Сначала выполните login")
+        rate = rate_data["rate"]
 
-        # Валидация
-        currency_code = validate_currency_code(currency_code)
-        amount = validate_amount(amount)
-
-        portfolio = self.user_manager.get_current_portfolio()
-
-        # Получение или создание кошелька
-        wallet = portfolio.get_wallet(currency_code)
+        # Получаем или создаем кошелек
+        wallet = portfolio.get_wallet(currency_code.upper())
         if not wallet:
-            wallet = portfolio.add_currency(currency_code)
+            wallet = portfolio.add_currency(currency_code.upper())
 
-        # Пополнение кошелька
         wallet.deposit(amount)
 
-        # Сохранение портфеля
-        self.user_manager._save_portfolio(portfolio)
+        PortfolioUseCases.save_portfolio(portfolio)
+        return portfolio, rate
 
-        # Расчет стоимости покупки
-        cost_in_usd = self._convert_currency(amount, currency_code, "USD")
+    @staticmethod
+    @log_action(action_name="SELL", verbose=True)
+    def sell_currency(user_id: int, currency_code: str, amount: float) -> Tuple[Portfolio, float]:
+        """Продать валюту"""
+        if amount <= 0:
+            raise ValueError("'amount' должен быть положительным числом")
 
-        return {
-            "currency": currency_code,
-            "amount": amount,
-            "new_balance": wallet.balance,
-            "cost_usd": cost_in_usd
-        }
+        # Валидация валюты через реестр
+        try:
+            currency = CurrencyRegistry.get_currency(currency_code.upper())
+        except CurrencyNotFoundError:
+            raise CurrencyNotFoundError(currency_code.upper())
 
-    def sell_currency(self, currency_code: str, amount: float) -> Dict:
-        """Продажа валюты"""
-        if not self.user_manager.current_user:
-            raise ValueError("Сначала выполните login")
+        portfolio = PortfolioUseCases.get_portfolio(user_id)
 
-        # Валидация
-        currency_code = validate_currency_code(currency_code)
-        amount = validate_amount(amount)
-
-        portfolio = self.user_manager.get_current_portfolio()
-
-        # Получение кошелька
-        wallet = portfolio.get_wallet(currency_code)
+        # Проверяем наличие кошелька
+        wallet = portfolio.get_wallet(currency_code.upper())
         if not wallet:
-            raise ValueError(f"У вас нет кошелька '{currency_code}'")
+            raise ValueError(f"У вас нет кошелька '{currency_code}'. "
+                             f"Добавьте валюту: она создаётся автоматически при первой покупке.")
 
-        # Проверка достаточности средств
-        if amount > wallet.balance:
-            raise ValueError(
-                f"Недостаточно средств: доступно {wallet.balance} {currency_code}, "
-                f"требуется {amount}"
+        # Проверяем достаточность средств
+        if wallet.balance < amount:
+            raise InsufficientFundsError(
+                available=wallet.balance,
+                required=amount,
+                code=currency_code.upper()
             )
 
-        # Снятие средств
+        # Получаем курс из базы данных
+        db = DatabaseManager()
+        rates = db.load_rates()
+        rate_key = f"{currency_code.upper()}_USD"
+
+        # Проверяем актуальность курса
+        settings = SettingsLoader()
+        ttl_seconds = settings.get("RATES_TTL_SECONDS", 300)
+
+        if rate_key not in rates.get("pairs", {}):
+            raise ValueError(f"Не удалось получить курс для {currency_code}")
+
+        rate_data = rates["pairs"][rate_key]
+        updated_at = datetime.fromisoformat(rate_data["updated_at"])
+        now = datetime.now()
+
+        if (now - updated_at).total_seconds() > ttl_seconds:
+            raise ValueError(f"Курс для {currency_code} устарел. Выполните 'update-rates'")
+
+        rate = rate_data["rate"]
+
+        # Снимаем средства
         wallet.withdraw(amount)
 
-        # Сохранение портфеля
-        self.user_manager._save_portfolio(portfolio)
+        PortfolioUseCases.save_portfolio(portfolio)
+        return portfolio, rate
 
-        # Расчет выручки
-        revenue_in_usd = self._convert_currency(amount, currency_code, "USD")
+    @staticmethod
+    @log_action(action_name="SHOW_PORTFOLIO", verbose=False)
+    def get_portfolio_with_rates(user_id: int, base_currency: str = 'USD') -> Tuple[Portfolio, dict]:
+        """Получить портфель с актуальными курсами"""
+        portfolio = PortfolioUseCases.get_portfolio(user_id)
 
-        return {
-            "currency": currency_code,
-            "amount": amount,
-            "new_balance": wallet.balance,
-            "revenue_usd": revenue_in_usd
-        }
+        db = DatabaseManager()
+        rates = db.load_rates()
 
-    def get_exchange_rate(self, from_currency: str, to_currency: str) -> Dict:
-        """Получение курса валюты"""
-        from_currency = validate_currency_code(from_currency)
-        to_currency = validate_currency_code(to_currency)
+        # Конвертируем курсы в нужную валюту
+        converted_rates = {}
+        for pair, rate_data in rates.get("pairs", {}).items():
+            if pair.endswith(f"_{base_currency}"):
+                currency = pair.replace(f"_{base_currency}", "")
+                converted_rates[currency] = rate_data["rate"]
 
-        # Проверка существования курса
-        rate_key = f"{from_currency}_{to_currency}"
-        rates = self.exchange_rates.get("rates", {})
+        return portfolio, converted_rates
 
-        if rate_key not in rates:
-            # Попытка получить обратный курс
+
+class RatesUseCases:
+    @staticmethod
+    def get_rate(from_currency: str, to_currency: str) -> Tuple[float, str]:
+        db = DatabaseManager()
+        rates = db.load_rates()
+
+        pair_key = f"{from_currency}_{to_currency}"
+
+        if pair_key not in rates.get("pairs", {}):
+            # Пробуем обратный курс
             reverse_key = f"{to_currency}_{from_currency}"
-            if reverse_key in rates:
-                rate = 1 / rates[reverse_key]["rate"]
-                return {
-                    "from": from_currency,
-                    "to": to_currency,
-                    "rate": rate,
-                    "updated_at": rates[reverse_key]["updated_at"]
-                }
+            if reverse_key in rates.get("pairs", {}):
+                rate = 1 / rates["pairs"][reverse_key]["rate"]
+                updated_at = rates["pairs"][reverse_key]["updated_at"]
+                return rate, updated_at
             else:
-                raise ValueError(f"Курс {from_currency}-{to_currency} недоступен")
+                raise ValueError(f"Курс {from_currency}={to_currency} недоступен")
 
-        rate_data = rates[rate_key]
-        return {
-            "from": from_currency,
-            "to": to_currency,
-            "rate": rate_data["rate"],
-            "updated_at": rate_data["updated_at"]
-        }
-
-    def _convert_currency(self, amount: float, from_currency: str, to_currency: str) -> float:
-        """Конвертация валюты"""
-        if from_currency == to_currency:
-            return amount
-
-        try:
-            rate_data = self.get_exchange_rate(from_currency, to_currency)
-            return amount * rate_data["rate"]
-        except ValueError:
-            return 0.0
+        rate_data = rates["pairs"][pair_key]
+        return rate_data["rate"], rate_data["updated_at"]

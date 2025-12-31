@@ -1,14 +1,5 @@
-#!/usr/bin/env python3
-"""Точка входа в приложение Валютный кошелёк"""
-
-from valutatrade_hub.cli.interface import CLIInterface
-
-
-def main():
-    """Основная функция запуска"""
-    cli = CLIInterface()
-    cli.run()
-
+import sys
+from valutatrade_hub.cli.interface import main
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
