@@ -1,93 +1,52 @@
 import logging
 import logging.handlers
-from pathlib import Path
-from typing import Dict, Any, Optional
-import json
+import os
 from datetime import datetime
-
-from .infra.settings import settings
+from valutatrade_hub.infra.settings import SettingsLoader
 
 
 def setup_logging():
-    """
-    Настройка системы логирования.
-    Создаёт директорию для логов и настраивает handlers.
-    """
-    log_dir = settings.log_dir
-    log_dir.mkdir(exist_ok=True)
+    """Настройка системы логирования"""
+    settings = SettingsLoader()
+    log_dir = settings.get("LOG_DIR", "logs")
+    os.makedirs(log_dir, exist_ok=True)
 
-    log_file = log_dir / "actions.log"
+    # Формат логов
+    log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    date_format = '%Y-%m-%d %H:%M:%S'
 
-    # Форматер
-    if settings.log_format == "json":
-        formatter = JsonFormatter()
-    else:
-        formatter = logging.Formatter(
-            fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+    # Основной логгер
+    logger = logging.getLogger('valutatrade')
+    logger.setLevel(logging.INFO)
 
-    # File handler с ротацией
+    # Очистка предыдущих обработчиков
+    if logger.handlers:
+        logger.handlers.clear()
+
+    # Файловый обработчик с ротацией
+    log_file = os.path.join(log_dir, 'actions.log')
     file_handler = logging.handlers.RotatingFileHandler(
-        filename=log_file,
-        maxBytes=settings.log_max_size_mb * 1024 * 1024,  # MB to bytes
-        backupCount=settings.log_backup_count,
+        log_file,
+        maxBytes=10 * 1024 * 1024,  # 10 MB
+        backupCount=5,
         encoding='utf-8'
     )
-    file_handler.setFormatter(formatter)
-    file_handler.setLevel(getattr(logging, settings.log_level))
+    file_handler.setLevel(logging.INFO)
+    file_formatter = logging.Formatter(log_format, datefmt=date_format)
+    file_handler.setFormatter(file_formatter)
 
-    # Console handler
+    # Консольный обработчик
     console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(logging.WARNING)
+    console_formatter = logging.Formatter('%(levelname)s: %(message)s')
+    console_handler.setFormatter(console_formatter)
 
-    # Настройка корневого логгера
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)
-    root_logger.addHandler(file_handler)
-    root_logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
 
-    # Отключаем логирование от внешних библиотек
-    logging.getLogger('urllib3').setLevel(logging.WARNING)
-    logging.getLogger('requests').setLevel(logging.WARNING)
-
-    return root_logger
-
-
-class JsonFormatter(logging.Formatter):
-    """Форматер для JSON логов"""
-
-    def format(self, record: logging.LogRecord) -> str:
-        log_object = {
-            "timestamp": datetime.now().isoformat(),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-            "module": record.module,
-            "function": record.funcName,
-            "line": record.lineno,
-        }
-
-        # Добавляем дополнительные поля из record.args, если они есть
-        if hasattr(record, 'extra'):
-            log_object.update(record.extra)
-
-        return json.dumps(log_object, ensure_ascii=False)
+    return logger
 
 
 def get_logger(name: str) -> logging.Logger:
-    """
-    Получение логгера с заданным именем.
-
-    Args:
-        name: Имя логгера
-
-    Returns:
-        Настроенный логгер
-    """
-    return logging.getLogger(name)
-
-
-# Инициализация логирования при импорте модуля
-logger = get_logger("valutatrade_hub")
+    """Получить именованный логгер"""
+    return logging.getLogger(f'valutatrade.{name}')

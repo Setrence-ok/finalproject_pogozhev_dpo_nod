@@ -1,88 +1,86 @@
 import json
 import os
-from typing import Any, Dict, List
-from pathlib import Path
+from typing import Optional
+from datetime import datetime
+from .models import User
+from ..infra.database import DatabaseManager
 
 
-class JSONFileManager:
-    """Менеджер для работы с JSON файлами"""
+class SessionManager:
+    _SESSION_FILE = "data/session.json"
 
-    def __init__(self, data_dir: str = "data"):
-        self.data_dir = Path(data_dir)
-        self.data_dir.mkdir(exist_ok=True)
+    @classmethod
+    def _ensure_session_file(cls):
+        """Создать файл сессии если его нет"""
+        if not os.path.exists(cls._SESSION_FILE):
+            os.makedirs(os.path.dirname(cls._SESSION_FILE), exist_ok=True)
+            with open(cls._SESSION_FILE, 'w') as f:
+                json.dump({}, f)
 
-    def _get_file_path(self, filename: str) -> Path:
-        """Получение полного пути к файлу"""
-        return self.data_dir / filename
+    @classmethod
+    def login(cls, user: User):
+        """Сохранить сессию в файл"""
+        cls._ensure_session_file()
 
-    def load_json(self, filename: str, default: Any = None) -> Any:
-        """Загрузка данных из JSON файла"""
-        file_path = self._get_file_path(filename)
+        session_data = {
+            'user_id': user.user_id,
+            'username': user.username,
+            'login_time': datetime.now().isoformat(),
+            'hashed_password': user.hashed_password  # для проверки при восстановлении
+        }
 
-        if not file_path.exists():
-            if default is not None:
-                self.save_json(filename, default)
-            return default or {}
+        with open(cls._SESSION_FILE, 'w', encoding='utf-8') as f:
+            json.dump(session_data, f, indent=2)
+
+    @classmethod
+    def logout(cls):
+        """Завершить сессию"""
+        cls._ensure_session_file()
+        with open(cls._SESSION_FILE, 'w', encoding='utf-8') as f:
+            json.dump({}, f)
+
+    @classmethod
+    def get_current_user(cls) -> Optional[User]:
+        """Восстановить пользователя из файла сессии"""
+        cls._ensure_session_file()
 
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, FileNotFoundError):
-            return default or {}
+            with open(cls._SESSION_FILE, 'r', encoding='utf-8') as f:
+                session_data = json.load(f)
 
-    def save_json(self, filename: str, data: Any) -> None:
-        """Сохранение данных в JSON файл"""
-        file_path = self._get_file_path(filename)
+            if not session_data or 'user_id' not in session_data:
+                return None
 
-        # Создаем директорию, если её нет
-        file_path.parent.mkdir(exist_ok=True)
+            # Загружаем пользователя из базы данных
+            db = DatabaseManager()
+            users = db.load_users()
 
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+            user_data = next(
+                (u for u in users if u['user_id'] == session_data['user_id']),
+                None
+            )
 
-    def append_to_json(self, filename: str, item: Any, key_field: str = "id") -> None:
-        """Добавление элемента в JSON файл (для списков)"""
-        data = self.load_json(filename, [])
+            if not user_data:
+                cls.logout()  # очищаем невалидную сессию
+                return None
 
-        if isinstance(data, list):
-            # Находим максимальный ID
-            max_id = max([item.get(key_field, 0) for item in data], default=0)
-            item[key_field] = max_id + 1
-            data.append(item)
-            self.save_json(filename, data)
-        else:
-            raise ValueError("Данные не являются списком")
+            # Проверяем, не изменился ли пароль
+            if user_data['hashed_password'] != session_data.get('hashed_password'):
+                cls.logout()  # пароль изменился - завершаем сессию
+                return None
 
+            return User.from_dict(user_data)
 
-def validate_currency_code(currency_code: str) -> str:
-    """Валидация кода валюты"""
-    if not currency_code or not isinstance(currency_code, str):
-        raise ValueError("Код валюты должен быть непустой строкой")
+        except (json.JSONDecodeError, FileNotFoundError, KeyError):
+            return None
 
-    currency_code = currency_code.upper().strip()
-    if len(currency_code) not in range(2, 6):
-        raise ValueError("Код валюты должен содержать 2-5 символов")
+    @classmethod
+    def is_logged_in(cls) -> bool:
+        """Проверить, есть ли активная сессия"""
+        return cls.get_current_user() is not None
 
-    return currency_code
-
-
-def validate_amount(amount: float) -> float:
-    """Валидация суммы"""
-    if not isinstance(amount, (int, float)):
-        raise TypeError("Сумма должна быть числом")
-
-    amount = float(amount)
-    if amount <= 0:
-        raise ValueError("Сумма должна быть положительным числом")
-
-    return amount
-
-
-def format_currency(value: float, currency: str = "USD") -> str:
-    """Форматирование денежных значений"""
-    if currency in ["USD", "EUR", "GBP"]:
-        return f"{value:,.2f} {currency}"
-    elif currency in ["BTC", "ETH"]:
-        return f"{value:.8f} {currency}"
-    else:
-        return f"{value:.2f} {currency}"
+    @classmethod
+    def get_current_user_id(cls) -> Optional[int]:
+        """Получить ID текущего пользователя"""
+        user = cls.get_current_user()
+        return user.user_id if user else None

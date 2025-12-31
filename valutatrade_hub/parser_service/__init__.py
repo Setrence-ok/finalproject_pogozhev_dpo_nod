@@ -1,45 +1,18 @@
-"""
-Parser Service для ValutaTrade Hub.
+"""Сервис парсинга курсов валют"""
 
-Этот модуль предоставляет функциональность для получения
-актуальных курсов валют из внешних API.
-"""
-
-from .config import config, ParserConfig
-from .api_clients import (
-    BaseApiClient,
-    CoinGeckoClient,
-    ExchangeRateApiClient,
-    MockApiClient,
-    create_api_client,
-)
-from .storage import storage, RatesStorage
-from .updater import updater, RatesUpdater
-from .scheduler import scheduler, RatesScheduler
+from .config import ParserConfig
+from .api_clients import CoinGeckoClient, ExchangeRateApiClient, BaseApiClient
+from .storage import RatesStorage
+from .updater import RatesUpdater
+from .scheduler import RatesScheduler, start_background_scheduler
 
 __all__ = [
-    # Конфигурация
-    "config",
-    "ParserConfig",
-
-    # API клиенты
-    "BaseApiClient",
-    "CoinGeckoClient",
-    "ExchangeRateApiClient",
-    "MockApiClient",
-    "create_api_client",
-
-    # Хранилище
-    "storage",
-    "RatesStorage",
-
-    # Обновление
-    "updater",
-    "RatesUpdater",
-
-    # Планировщик
-    "scheduler",
-    "RatesScheduler",
+    'ParserConfig',
+    'CoinGeckoClient',
+    'ExchangeRateApiClient',
+    'BaseApiClient',
+    'RatesStorage',
+    'RatesUpdater',
+    'RatesScheduler',
+    'start_background_scheduler',
 ]
-
-__version__ = "1.0.0"

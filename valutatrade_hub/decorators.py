@@ -1,202 +1,82 @@
 import functools
-import time
-from typing import Callable, Any, Optional, Dict
+import logging
 from datetime import datetime
+from typing import Callable, Any
 
 from .logging_config import get_logger
-from .core.exceptions import InsufficientFundsError, CurrencyNotFoundError, ApiRequestError
-
-logger = get_logger("actions")
 
 
-def log_action(action: str, verbose: bool = False):
+def log_action(action_name: str = None, verbose: bool = False):
     """
     Декоратор для логирования действий пользователя.
 
     Args:
-        action: Название действия (BUY, SELL, REGISTER, LOGIN и т.д.)
-        verbose: Подробное логирование (добавляет контекст)
-
-    Returns:
-        Декорированная функция
+        action_name: Название действия (BUY/SELL/REGISTER/LOGIN)
+        verbose: Подробное логирование с состоянием до/после
     """
 
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            # Подготовка контекста для логирования
-            log_context = {
-                "action": action,
-                "timestamp": datetime.now().isoformat(),
-                "function": func.__name__,
-                "module": func.__module__,
-            }
+            logger = get_logger('actions')
 
-            # Извлекаем полезные аргументы из функции
+            # Извлекаем информацию о пользователе из аргументов
+            user_info = {}
             try:
-                # Для методов usecases, первый аргумент - self, второй - user_id
-                if len(args) >= 2 and hasattr(args[0], '__class__'):
-                    log_context["user_id"] = args[1] if len(args) > 1 else "unknown"
+                # Пытаемся найти user_id в аргументах
+                for arg in args:
+                    if hasattr(arg, 'user_id'):
+                        user_info['user_id'] = arg.user_id
+                    if hasattr(arg, 'username'):
+                        user_info['username'] = arg.username
 
-                # Ищем username в kwargs или args
+                # Или в kwargs
+                if 'user_id' in kwargs:
+                    user_info['user_id'] = kwargs['user_id']
                 if 'username' in kwargs:
-                    log_context["username"] = kwargs['username']
-                elif len(args) >= 2 and isinstance(args[1], str):
-                    # Предполагаем, что второй аргумент - username для register/login
-                    log_context["username"] = args[1]
-
-                # Ищем currency и amount
-                if 'currency_code' in kwargs:
-                    log_context["currency"] = kwargs['currency_code']
-                elif 'currency' in kwargs:
-                    log_context["currency"] = kwargs['currency']
-
-                if 'amount' in kwargs:
-                    log_context["amount"] = kwargs['amount']
-            except (IndexError, AttributeError):
+                    user_info['username'] = kwargs['username']
+            except:
                 pass
 
-            start_time = time.time()
-            result = "OK"
-            error_info = {}
+            action = action_name or func.__name__.upper()
+
+            # Подготовка данных для лога
+            log_data = {
+                'timestamp': datetime.now().isoformat(),
+                'action': action,
+                'function': func.__name__,
+                'username': user_info.get('username', 'unknown'),
+                'user_id': user_info.get('user_id', 'unknown'),
+            }
+
+            # Добавляем параметры если verbose
+            if verbose:
+                log_data['args'] = str(args)
+                log_data['kwargs'] = str(kwargs)
 
             try:
-                # Выполнение функции
-                func_result = func(*args, **kwargs)
+                # Выполняем функцию
+                result = func(*args, **kwargs)
 
-                # Добавляем результат в контекст, если нужно
-                if verbose and func_result:
-                    if isinstance(func_result, dict):
-                        log_context.update({f"result_{k}": v for k, v in func_result.items()})
-                    else:
-                        log_context["result"] = str(func_result)
+                # Логируем успех
+                log_data['result'] = 'OK'
+                if verbose and hasattr(result, 'to_dict'):
+                    log_data['result_data'] = str(result.to_dict())
 
-                return func_result
+                logger.info(f"{action} - Успех: {log_data}")
 
-            except InsufficientFundsError as e:
-                result = "ERROR"
-                error_info = {
-                    "error_type": "InsufficientFundsError",
-                    "error_message": str(e),
-                    "currency": getattr(e, 'currency_code', 'unknown'),
-                    "available": getattr(e, 'available', 0),
-                    "required": getattr(e, 'required', 0),
-                }
-                raise
-
-            except CurrencyNotFoundError as e:
-                result = "ERROR"
-                error_info = {
-                    "error_type": "CurrencyNotFoundError",
-                    "error_message": str(e),
-                    "currency": getattr(e, 'currency_code', 'unknown'),
-                }
-                raise
-
-            except ApiRequestError as e:
-                result = "ERROR"
-                error_info = {
-                    "error_type": "ApiRequestError",
-                    "error_message": str(e),
-                    "reason": getattr(e, 'reason', 'unknown'),
-                }
-                raise
+                return result
 
             except Exception as e:
-                result = "ERROR"
-                error_info = {
-                    "error_type": e.__class__.__name__,
-                    "error_message": str(e),
-                }
+                # Логируем ошибку
+                log_data['result'] = 'ERROR'
+                log_data['error_type'] = type(e).__name__
+                log_data['error_message'] = str(e)
+
+                logger.error(f"{action} - Ошибка: {log_data}")
+
+                # Пробрасываем исключение дальше
                 raise
-
-            finally:
-                # Логирование результата
-                execution_time = time.time() - start_time
-                log_context.update({
-                    "result": result,
-                    "execution_time_ms": round(execution_time * 1000, 2),
-                    **error_info,
-                })
-
-                if result == "OK":
-                    logger.info(f"{action} completed successfully", extra=log_context)
-                else:
-                    logger.error(f"{action} failed", extra=log_context)
-
-        return wrapper
-
-    return decorator
-
-
-def measure_time(func: Callable) -> Callable:
-    """Декоратор для измерения времени выполнения функции"""
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        end_time = time.time()
-
-        logger.debug(
-            f"Function {func.__name__} executed in {end_time - start_time:.4f} seconds",
-            extra={
-                "function": func.__name__,
-                "execution_time": end_time - start_time,
-            }
-        )
-
-        return result
-
-    return wrapper
-
-
-def retry_on_failure(max_retries: int = 3, delay: float = 1.0):
-    """
-    Декоратор для повторной попытки выполнения при ошибках.
-
-    Args:
-        max_retries: Максимальное количество попыток
-        delay: Задержка между попытками в секундах
-
-    Returns:
-        Декорированная функция
-    """
-
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            last_exception = None
-
-            for attempt in range(max_retries):
-                try:
-                    return func(*args, **kwargs)
-                except (ApiRequestError, ConnectionError, TimeoutError) as e:
-                    last_exception = e
-
-                    if attempt < max_retries - 1:
-                        logger.warning(
-                            f"Attempt {attempt + 1}/{max_retries} failed for {func.__name__}: {e}. "
-                            f"Retrying in {delay} seconds...",
-                            extra={
-                                "function": func.__name__,
-                                "attempt": attempt + 1,
-                                "max_retries": max_retries,
-                                "error": str(e),
-                            }
-                        )
-                        time.sleep(delay)
-                    else:
-                        logger.error(
-                            f"All {max_retries} attempts failed for {func.__name__}",
-                            extra={
-                                "function": func.__name__,
-                                "error": str(e),
-                            }
-                        )
-
-            # Если все попытки провалились, пробрасываем последнее исключение
-            raise last_exception if last_exception else Exception("Unknown error")
 
         return wrapper
 
