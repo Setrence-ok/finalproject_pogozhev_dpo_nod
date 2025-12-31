@@ -1,6 +1,5 @@
 import argparse
 import sys
-from prettytable import PrettyTable
 from datetime import datetime
 
 from ..core.usecases import UserUseCases, PortfolioUseCases, RatesUseCases
@@ -57,7 +56,6 @@ def handle_update_rates(source: str = None) -> int:
 def mock_update_rates():
     """Мок-обновление курсов для тестирования"""
     from ..infra.database import DatabaseManager
-    import json
     from datetime import datetime
 
     print("INFO: Using mock update (no real API calls)...")
@@ -174,7 +172,7 @@ def handle_register(username: str, password: str) -> int:
 
 def handle_login(username: str, password: str) -> int:
     try:
-        user = UserUseCases.login(username, password)
+        UserUseCases.login(username, password)
         print(f"Вы вошли как '{username}'")
         return 0
     except ValueError as e:
@@ -280,7 +278,7 @@ def handle_sell(currency: str, amount: float) -> int:
     except InsufficientFundsError as e:
         print(str(e))
         return 1
-    except CurrencyNotFoundError as e:
+    except CurrencyNotFoundError:
         print(f"Неизвестная валюта '{currency}'. Используйте команду 'get-rate' для проверки доступных валют.")
         return 1
     except ValueError as e:
@@ -305,7 +303,7 @@ def handle_get_rate(from_currency: str, to_currency: str) -> int:
         print(f"Обратный курс {to_currency.upper()}={from_currency.upper()}: {reverse_rate:.6f}")
 
         return 0
-    except ValueError as e:
+    except ValueError:
         print(f"Курс {from_currency.upper()}={to_currency.upper()} недоступен. Повторите попытку позже...")
         return 1
 

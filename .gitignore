@@ -5,7 +5,8 @@ dist/
 build/
 *.egg-info/
 .pytest_cache/
-.vscode/
+.venv/
 .idea/
-data/*.json        # Исключаем реальные данные из Git (кроме примера)
-logs/
+data/*.json
+logs/*
+.ruff_cache/

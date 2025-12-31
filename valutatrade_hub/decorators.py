@@ -1,7 +1,6 @@
 import functools
-import logging
 from datetime import datetime
-from typing import Callable, Any
+from typing import Callable
 
 from .logging_config import get_logger
 
@@ -35,7 +34,7 @@ def log_action(action_name: str = None, verbose: bool = False):
                     user_info['user_id'] = kwargs['user_id']
                 if 'username' in kwargs:
                     user_info['username'] = kwargs['username']
-            except:
+            except: # noqa
                 pass
 
             action = action_name or func.__name__.upper()

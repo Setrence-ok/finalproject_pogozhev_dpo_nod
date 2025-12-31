@@ -1,7 +1,7 @@
 import json
 import os
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict
 import tempfile
 
 from .config import ParserConfig
@@ -52,7 +52,7 @@ class RatesStorage:
             # Перемещаем временный файл в целевой
             os.replace(temp_file, self.config.RATES_FILE_PATH)
 
-        except Exception as e:
+        except Exception:
             if temp_file and os.path.exists(temp_file):
                 os.unlink(temp_file)
             raise

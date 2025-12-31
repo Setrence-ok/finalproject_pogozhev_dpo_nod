@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "finalproject_pogozhev_dpo_nod"
+version = "0.1.0"
+description = "Консольное приложение для управления валютным кошельком"
+authors = ["Evgenii Pogozhev <your.email@example.com>"]
+readme = "README.md"
+packages = [{include = "valutatrade_hub"}]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+prettytable = "^3.10.0"
+requests = "^2.32.0"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.9.0"
+
+[tool.poetry.scripts]
+project = "main:main"
+valutatrade = "main:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"

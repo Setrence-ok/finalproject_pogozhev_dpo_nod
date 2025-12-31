@@ -1,4 +1,3 @@
-import time
 import threading
 import logging
 from datetime import datetime, timedelta

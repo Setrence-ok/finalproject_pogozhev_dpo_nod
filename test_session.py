@@ -1,7 +1,7 @@
 import sys
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from valutatrade_hub.cli.interface import main as cli_main
 
 
@@ -27,7 +27,7 @@ class FinalTester:
                     self.record_fail(f"Ожидалась ошибка: {expected_error}")
                     return False
                 else:
-                    self.record_success(f"Получена ожидаемая ошибка")
+                    self.record_success("Получена ожидаемая ошибка")
                     return True
             else:
                 # Проверяем что успех
@@ -35,7 +35,7 @@ class FinalTester:
                     self.record_fail(f"Команда завершилась с ошибкой: {result}")
                     return False
                 else:
-                    self.record_success(f"Команда выполнена успешно")
+                    self.record_success("Команда выполнена успешно")
                     return True
 
         except Exception as e:
@@ -75,7 +75,7 @@ class FinalTester:
                         json.dump({}, f)
                     else:
                         json.dump([], f)
-            except:
+            except: # noqa
                 pass
 
     def create_fresh_rates(self):
@@ -289,13 +289,13 @@ class FinalTester:
         passed = sum(1 for status, _ in self.test_results if "✅" in status)
         failed = total - passed
 
-        print(f"\n📊 Статистика:")
+        print("\n📊 Статистика:")
         print(f"   Всего проверок: {total}")
         print(f"   Успешных: {passed}")
         print(f"   Проваленных: {failed}")
 
         if failed > 0:
-            print(f"\n⚠ Проблемные проверки:")
+            print("\n⚠ Проблемные проверки:")
             for i, (status, message) in enumerate(self.test_results, 1):
                 if "❌" in status:
                     print(f"   {i}. {message}")

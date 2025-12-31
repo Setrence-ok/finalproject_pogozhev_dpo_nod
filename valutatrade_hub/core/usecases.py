@@ -1,15 +1,12 @@
-import json
-import os
 from datetime import datetime
-from typing import Dict, Optional, Tuple
+from typing import Tuple
 
-from .exceptions import CurrencyNotFoundError, InsufficientFundsError
-from .models import User, Wallet, Portfolio
+from .exceptions import InsufficientFundsError
+from .models import User, Portfolio
 from .utils import SessionManager
 from ..infra.database import DatabaseManager
 from ..decorators import log_action
 from ..infra.settings import SettingsLoader
-from .currencies import CurrencyRegistry
 
 
 class UserUseCases:
@@ -103,12 +100,6 @@ class PortfolioUseCases:
         if amount <= 0:
             raise ValueError("'amount' должен быть положительным числом")
 
-        # Валидация валюты через реестр
-        try:
-            currency = CurrencyRegistry.get_currency(currency_code.upper())
-        except CurrencyNotFoundError:
-            raise CurrencyNotFoundError(currency_code.upper())
-
         portfolio = PortfolioUseCases.get_portfolio(user_id)
 
         # Получаем курс из базы данных
@@ -148,12 +139,6 @@ class PortfolioUseCases:
         """Продать валюту"""
         if amount <= 0:
             raise ValueError("'amount' должен быть положительным числом")
-
-        # Валидация валюты через реестр
-        try:
-            currency = CurrencyRegistry.get_currency(currency_code.upper())
-        except CurrencyNotFoundError:
-            raise CurrencyNotFoundError(currency_code.upper())
 
         portfolio = PortfolioUseCases.get_portfolio(user_id)
 

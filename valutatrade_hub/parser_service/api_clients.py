@@ -1,7 +1,6 @@
 import requests
 from abc import ABC, abstractmethod
 from typing import Dict
-import time
 
 from ..core.exceptions import ApiRequestError
 from .config import ParserConfig

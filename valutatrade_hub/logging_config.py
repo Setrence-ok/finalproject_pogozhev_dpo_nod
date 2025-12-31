@@ -1,7 +1,6 @@
 import logging
 import logging.handlers
 import os
-from datetime import datetime
 from valutatrade_hub.infra.settings import SettingsLoader
 
 
