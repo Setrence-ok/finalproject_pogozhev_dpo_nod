@@ -1,12 +1,9 @@
 __pycache__/
-*.py[cod]
-*$py.class
 dist/
 build/
-*.egg-info/
 .pytest_cache/
 .venv/
 .idea/
-data/*.json
+data/*
 logs/*
 .ruff_cache/
